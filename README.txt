@@ -1,0 +1,1 @@
+This is going to be my first attempt to build a Twitch channel bot with Python and learn Git in the meantime
