@@ -7,6 +7,8 @@ Need to rethink how I want to manage it in the best way possible.
 TO DO:
 -command counters can't get reset on restarting the bot (database?)
 -multiple channels should have the same command but different counts (database?)
+-commands should take parameters custom parameters (**kwargs should do the trick?)
+-adding time-based commands
 
 """
 from typing import *
@@ -27,18 +29,33 @@ class Command:
         function = None
         count = None
         ran_range = None
-        for i in params[2:]:
-            if i.startswith('message='):
-                message = i[8:]
-            elif i.startswith('function='):
-                function = i[9:]
-            elif i.startswith('count='):
-                count = int(i[6:])
-            elif i.startswith('ran_range='):
-                 ran_range = i[10:]
+        inum = 2
+        for i in range(2,len(params)):
+            if params[i].startswith('message='):
+                message = params[i][8:]
+                counter = i+1
+                while counter < len(params):
+                    message = message + ' ' + params[counter]
+                    if "'" in params[counter]:
+                        break
+                    counter += 1
+
+            elif params[i].startswith('function='):
+                function = params[i][9:]
+                counter = i + 1
+                while counter < len(params):
+                    function = function + ' ' + params[counter]
+                    if r"'" in params[counter]:
+                        break
+                    counter += 1
+            elif params[i].startswith('count='):
+                count = int(params[i][6:])
+            elif params[i].startswith('ran_range='):
+                 ran_range = params[i][10:]
+            inum += 1
         try:
             Command(name, message, function, count, ran_range)
-            return "Command added."
+            return "Command '{}' added.".format(name)
         except: #bare except block yada yada
             return "Error - could not add command."
 
@@ -47,8 +64,94 @@ class Command:
     def edit(message):
         pass
 
-    commands = {'add':add, "edit":edit}
-    def __init__(self, name: str, message: Optional[str] = None, function: Optional[str] = None, count: Optional[int] = None, ran_range: Optional[list[int,int]] = None, *params):
+
+    @staticmethod
+    def _pass():
+        pass
+
+    def __call__(self, *args, **kwargs):
+        #this is probably unsafe, i'll figure something out later since i'm the only one using the bot now
+        exec(self._parse_function(),{"__builtins__": {"print":print}, "Command":Command, "Command.commands":Command.commands},{"self":self})
+        if self.message: return self._parse_message()
+
+    def show(self):
+        print(self.name, self.message, self.count, self.function)
+
+    def _parse_function(self) -> str:
+        """
+        Takes self.function from the Command object and converts it from unparsed state (for example: '{count} = {count} + 1.) to a parsed state ('self.count = self.count + 1.)
+        Also changes 'xxxxx.count' into 'Command.commands['xxxxx'].count, so values from other commands are also available.
+        This is then put into exec() in Command.__call__
+        :return: a parsed string
+        """
+        output = ''
+        bracket = False
+        variables = []
+        for char in self.function:
+            if bracket:
+                if char == '}':
+                    bracket = False
+                    variables.append(variable)
+                    output += char
+                else:
+                    variable += char
+                continue
+
+            if char == '{':
+                bracket = True
+                variable = ''
+                output += char
+
+            else:
+                output += char
+
+        for i in range(len(variables)):
+            if "." in variables[i]:
+                idx = variables[i].index(".")
+                variables[i] = "Command.commands['{}'].{}".format(variables[i][:idx], variables[i][idx+1:])
+            else:
+                variables[i] = "self." + variables[i]
+        output = output.format(*[i for i in variables])
+        return output
+
+    def _parse_message(self) -> str:
+        """
+        Takes self.message from the Command object and converts it from unparsed state (for example: 'The count is {count}.) to a parsed state ('The count is 6.)
+        :return: a parsed string
+        """
+        output = ''
+        bracket = False
+        variables = []
+        for char in self.message:
+            if bracket:
+                if char == '}':
+                    bracket = False
+                    variables.append(variable)
+                    output += char
+                else:
+                    variable += char
+                continue
+
+            if char == '{':
+                bracket = True
+                variable = ''
+                output += char
+
+            else:
+                output += char
+        for i in range(len(variables)):
+            if "." in variables[i]:
+                idx = variables[i].index(".")
+                variables[i] = "Command.commands['{}'].{}".format(variables[i][:idx], variables[i][idx+1:])
+            else:
+                variables[i] = "self." + variables[i]
+        output = output.format(*[eval(i, {"Command":Command}, {'self': self}) for i in variables])
+        return output
+
+    commands = {'add':add, "edit":edit, "show": show}
+
+
+    def __init__(self, name: str, message: Optional[str] = None, function: Optional[str] = None, count: Optional[int] = None, ran_range: Optional[list[int,int]] = None, **params):
         """
         :param name: the name of the command, maybe it'll come in handy, dunno yet
         :param message: message to be sent out to chat
@@ -58,39 +161,42 @@ class Command:
         :param params: does nothing yet
         """
         self.name = name
-        self.message = message
-        if function: self.function = Command._parse_function(function)
+        self.message = message.strip("'")
+        if function: self.function = function.strip("'")
         else: self.function = Command._pass
         self.count = count
         self.ran_range = ran_range
         Command.commands[self.name] = self
+        self.params = params
 
-    @staticmethod
-    def _pass():
-        pass
-
-    def __call__(self, *args, **kwargs):
-        self.function()
-        if self.message: return self._parse_message()  #this is probably unsafe, i'll figure something out later since i'm the only one using the bot now
-
-    def show(self):
-        print(self.name, self.message, self.count, self.function)
-
-    def _parse_function(func):
-        def function():
-            print('xd')
-        return function
-
-    def _parse_message(self):
-        return self.message
 
 
 # !add counter count=0 message="The count is {count}" function="count = count + 1"
 
 
-counter = Command(name='!counter', message='The count is {self.count}.format(self.count)', count=1, function = None)
-#counter.show()
-#print(counter())
-print(Command.add("add deth count=0 message='deth' function=None ran_range=(0,10)"))
+#counter = Command(name='!counter', message='The count is {self.count}.format(self.count)', count=1, function = None)
 
-print(Command.commands["deth"].count)
+#death = Command(name='death', count=5314, message='KEKW u died lmao. {self.count}')
+#death = Command(name='death', count = 5314, message='KEKW u died lmao. {Command.commands["death"].count}')
+
+print(Command.add("!add lol count=123 message='abc{count}'"))
+print(Command.add("!add deth count=0 message='KEKW u died lmao. {count}' function='{count} = {count} + 1'"))
+
+print(Command.commands['deth']())
+print(Command.commands['deth']())
+print(Command.commands['deth']())
+print(Command.commands['deth']())
+
+
+
+
+
+
+#Command.commands['deth'].show()
+#print(Command.commands['deth']())
+#counter.show()
+
+#print(Command._parse_message('The count of !counter command is {counter.count}'))
+#print(Command.commands['deth'].message)
+#print(Command.commands['deth'].function)
+#print(Command._parse_message('The deathcount is {Command.commands["deth"].count}. {Command.commands["deth"].message}'))

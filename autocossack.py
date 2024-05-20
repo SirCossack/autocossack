@@ -4,10 +4,8 @@ The main file of the bot, i have no idea what i'm doing
 TO DO:
 
 -clean up documentation and HTTP requests since they aren't readable at all
--set up actual commands
--set up commands that post something every once in a while
 -mysql/sqlite integration (probably both)
--error handling
+-error handling?
 -bot should probably be able to work on many streams at once and that's not the case for now
 """
 import commands
