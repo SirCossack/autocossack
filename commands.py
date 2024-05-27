@@ -113,6 +113,10 @@ class Command:
                 variables[i] = "self." + variables[i]
         output = output.format(*[i for i in variables])
         return output
+        def func(*params):
+            for char in output:
+                if
+            return output
 
     def _parse_message(self) -> str:
         """
@@ -161,7 +165,8 @@ class Command:
         :param params: does nothing yet
         """
         self.name = name
-        self.message = message.strip("'")
+        if message: self.message = message.strip("'")
+        else: self.message = ""
         if function: self.function = function.strip("'")
         else: self.function = Command._pass
         self.count = count
@@ -171,32 +176,6 @@ class Command:
 
 
 
-# !add counter count=0 message="The count is {count}" function="count = count + 1"
-
-
-#counter = Command(name='!counter', message='The count is {self.count}.format(self.count)', count=1, function = None)
-
-#death = Command(name='death', count=5314, message='KEKW u died lmao. {self.count}')
-#death = Command(name='death', count = 5314, message='KEKW u died lmao. {Command.commands["death"].count}')
-
-print(Command.add("!add lol count=123 message='abc{count}'"))
-print(Command.add("!add deth count=0 message='KEKW u died lmao. {count}' function='{count} = {count} + 1'"))
-
-print(Command.commands['deth']())
-print(Command.commands['deth']())
-print(Command.commands['deth']())
-print(Command.commands['deth']())
-
-
-
-
-
-
-#Command.commands['deth'].show()
-#print(Command.commands['deth']())
-#counter.show()
-
-#print(Command._parse_message('The count of !counter command is {counter.count}'))
-#print(Command.commands['deth'].message)
-#print(Command.commands['deth'].function)
-#print(Command._parse_message('The deathcount is {Command.commands["deth"].count}. {Command.commands["deth"].message}'))
+print(Command.add("!add test count=2 message=print('hello my name is {count}')"))
+print(Command.commands['test'])
+print(Command.commands['test']())
