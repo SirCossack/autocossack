@@ -8,12 +8,13 @@ TO DO:
 -error handling?
 -bot should probably be able to work on many streams at once and that's not the case for now
 """
-import commands
+from commands import Command
 import requests as rq
-import websocket as ws
 import json
 import authconfig
 import threading
+import websocket as ws
+ws.enableTrace(True)
 
 def get_user_id(user: str) -> str:
     """
@@ -42,7 +43,7 @@ def send_message(channel: str, message: str):
                         'message': '{}'.format(message)}))
 
 
-def _onmessage(wsapp, message):
+def _onmessage(wsapp, message) -> None:
     """
     Function reacts to websocket messages that occur during connection.
     :param wsapp: (object) the websocket connection that the messages are coming from
@@ -50,13 +51,19 @@ def _onmessage(wsapp, message):
     :return:
     """
     if json.loads(message)['metadata']['message_type'] == 'notification':
-
-        if json.loads(message)['payload']['event']['message']['text'].startswith('!counter'):
-             send_message(authconfig.channel, commands.counter())
-
-
-    if json.loads(message)['metadata']['message_type'] == 'session_keepalive':
-        return
+        print(json.loads(message)['payload']['event']['badges'])
+        chat_message = json.loads(message)['payload']['event']['message']['text']
+        print(chat_message)
+        if chat_message.startswith("!"):
+            mod = False
+            for i in json.loads(message)['payload']['event']['badges']:
+                if i.get('set_id') == 'moderator' or i.get('set_id') == 'broadcaster':
+                    mod = True
+                    break
+            if Command.commands.get(chat_message.split()[0][1:]):
+                send_message(authconfig.channel, Command.commands[chat_message.split()[0][1:]](mod, chat_message))
+            else:
+                send_message(authconfig.channel, "Command {} not found.".format(chat_message.split()[0]))
 
     if json.loads(message)['metadata']['message_type'] == 'session_welcome':
         sessionid = json.loads(message)['payload']['session']['id']
@@ -79,15 +86,11 @@ def _onmessage(wsapp, message):
 
 
 
-
-
-
-ws.enableTrace(True)
-
 authheaders = {'Client-Id': authconfig.client_id, 'Authorization': 'Bearer {}'.format(authconfig.app_token)}
 socket = ws.WebSocketApp("wss://eventsub.wss.twitch.tv/ws", header=authheaders, on_message=_onmessage)
-
-sc = socket.run_forever(sslopt={'username':authconfig.username, 'password':'oauth:{}'.format(authconfig.app_token),'channels':authconfig.channel})
+socket.run_forever(sslopt={'username':authconfig.username,
+                           'password':'oauth:{}'.format(authconfig.app_token),
+                           'channels':authconfig.channel})
 
 
 

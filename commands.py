@@ -1,14 +1,10 @@
 """
 Place where I'll hopefully be able to store bot commands
 
-Not sure whether I want to continue using commands as a class as it's messy.
-Need to rethink how I want to manage it in the best way possible.
 
 TO DO:
 -command counters can't get reset on restarting the bot (database?)
 -multiple channels should have the same command but different counts (database?)
--commands should take parameters custom parameters (**kwargs should do the trick?)
--adding time-based commands
 
 """
 from typing import *
@@ -16,78 +12,125 @@ from typing import *
 
 class Command:
     @staticmethod
-    def add(message: str) -> str:
+    def add(mod:bool , message:str) -> str:
         """
-        A command to add another commands in chat. It's ugly, i hate it, I'm not even sure it works
+        A command to add another commands in chat. I hate it slightly less than the first implementation.
+        The input string format:
+
+            "!add (command_name) (integer_variable_name)=(variable_value) (string_variable.name)='(string_variable_value)' (list_variable_name)=[(item1),(item2),(item3)...]"
+
+            The command supports addition of 3 specific variables (message, function and time) as well custom variables like counters.
+            message: [str] - specifies the message to be sent to Twitch chatroom by the bot
+            function: [str] - operation in code, like increasing counters or editing values
+            time: [int] - if specified, the command will be called every (time) seconds. Should be at least 30.
+
+        Example:
+            "!add deathcount message='The streamer has died {count} times.' function='{count} = {count} + 1' count=0"
+
+        :param mod: param specyfing if the user calling the command has moderator access
         :param message: The message from chat the bot will receive
         :return: a string saying weather a command was successfully created
         """
-        #I know the implementation is horrible, not-scalable etc but I want to get this to work asap
+        if not mod:
+            return "This command is reserved for users with moderator access"
+
         params = message.split()
         name = params[1]
+        if Command.commands.get(name):
+            return "Command !{} alredy exists.".format(name)
         message = None
         function = None
-        count = None
-        ran_range = None
-        inum = 2
-        for i in range(2,len(params)):
+        time = None
+        kwargs = {}
+        i=2
+        while i < len(params):
             if params[i].startswith('message='):
                 message = params[i][8:]
-                counter = i+1
-                while counter < len(params):
-                    message = message + ' ' + params[counter]
-                    if "'" in params[counter]:
+                i += 1
+                if message.endswith(("'",'"')):
+                    continue
+                while i < len(params):
+                    message = message + ' ' + params[i]
+                    if "'" in params[i] or '"' in params[i]:
                         break
-                    counter += 1
+                    i += 1
 
             elif params[i].startswith('function='):
                 function = params[i][9:]
-                counter = i + 1
-                while counter < len(params):
-                    function = function + ' ' + params[counter]
-                    if r"'" in params[counter]:
+                i = i + 1
+                if function.endswith(("'", '"')):
+                    continue
+                while i < len(params):
+                    function = function + ' ' + params[i]
+                    if "'" in params[i] or '"' in params[i]:
                         break
-                    counter += 1
-            elif params[i].startswith('count='):
-                count = int(params[i][6:])
-            elif params[i].startswith('ran_range='):
-                 ran_range = params[i][10:]
-            inum += 1
+                    i += 1
+
+            elif params[i].startswith('time='):
+                time = int(params[i][5:])
+                if time < 30:
+                    return "Cannot add command - time should be at least 30s"
+
+            elif "=" in params[i]:
+                key = params[i][:params[i].index("=")]
+                value = params[i][1+params[i].index("="):]
+                i += 1
+                while i < len(params) and '=' not in params[i]:
+                    value += " " + params[i]
+                    i += 1
+                kwargs[key] = value
+                i -= 1
+            i += 1
         try:
-            Command(name, message, function, count, ran_range)
+            Command(name, message, function, time, **kwargs)
             return "Command '{}' added.".format(name)
-        except: #bare except block yada yada
-            return "Error - could not add command."
-
-
-    @staticmethod
-    def edit(message):
-        pass
-
+        except Exception: #placeholder since i don't yet know what errors to expect
+            raise Exception
 
     @staticmethod
-    def _pass():
-        pass
-
-    def __call__(self, *args, **kwargs):
-        #this is probably unsafe, i'll figure something out later since i'm the only one using the bot now
-        exec(self._parse_function(),{"__builtins__": {"print":print}, "Command":Command, "Command.commands":Command.commands},{"self":self})
-        if self.message: return self._parse_message()
-
-    def show(self):
-        print(self.name, self.message, self.count, self.function)
-
-    def _parse_function(self) -> str:
+    def delete(mod:bool , message:str) -> str:
         """
-        Takes self.function from the Command object and converts it from unparsed state (for example: '{count} = {count} + 1.) to a parsed state ('self.count = self.count + 1.)
-        Also changes 'xxxxx.count' into 'Command.commands['xxxxx'].count, so values from other commands are also available.
-        This is then put into exec() in Command.__call__
-        :return: a parsed string
+        Command to delete other commands.
+        The input string format:
+            !del (command.name)
+
+        :param mod: param specyfing if the user calling the command has moderator access
+        :param message: The message from chat the bot will receive
+        :return: a string saying weather a command was successfully created"""
+
+        if not mod:
+            return "This command is reserved for users with moderator access"
+
+        if message.split()[1] == 'add' or message.split()[1] == 'del':
+            return "Command cannot be deleted."
+
+        else:
+            del Command.commands[message.split()[1]]
+            return "Command deleted successfully"
+
+    def __call__(self, mod, *args):
+        if self.mod and not mod:
+            return "This command is reserved for users with moderator access"
+        else:
+            if self.function: exec(self.function(*args),{"__builtins__": {}, "Command":Command, "Command.commands":Command.commands},{"self":self})
+            if self.message: return self._parse("message", self.message.strip("'"))(*args)
+
+
+
+    def _parse(self, type: str, message: str) -> Callable:
+        """
+        Takes self.function/self.message from the Command object and converts it from unparsed state (for example: '{count} = {count} + 1.) to a function returning a parsed string ('self.count = self.count + 1.)
+        Also changes 'xxxxx.count' into 'Command.commands['xxxxx'].count, so variables from other commands are also available.
+        Also changes '{#1}', '{#2}', '{#3}'... into arguments that will be passed to a returned function
+        :param type: determines whether to return message or function, since they need slightly different formatting. Should be either "message" or "function"
+        :param message: self.message or self.function
+        :return: a function returning a parsed string
         """
         output = ''
         bracket = False
         variables = []
-        for char in self.function:
+        arguments = []
+        for char in message:
             if bracket:
                 if char == '}':
                     bracket = False
@@ -109,73 +152,50 @@ class Command:
             if "." in variables[i]:
                 idx = variables[i].index(".")
                 variables[i] = "Command.commands['{}'].{}".format(variables[i][:idx], variables[i][idx+1:])
+            elif "#" in variables[i]:
+                arguments.append(int(variables[i][1:]))
+                variables[i] = "{}"
             else:
                 variables[i] = "self." + variables[i]
-        output = output.format(*[i for i in variables])
-        return output
-        def func(*params):
-            for char in output:
-                if
-            return output
 
-    def _parse_message(self) -> str:
+        if type == "message":
+            output = output.format(*[eval(i, {"__builtins":{}}, {"self": self}) for i in variables])
+        if type == "function":
+            output = output.format(*[i for i in variables])
+
+
+        if arguments:
+            def a(*chat_message):
+                chat_message = chat_message[0].split()
+                return output.format(*(chat_message[i] for i in arguments))
+        else:
+            def a(*chat_message):
+                return output
+        return a
+
+    commands = {'add':add, 'del':delete}
+    time_commands = {}
+
+    def __init__(self, name: str, message: Optional[str] = None, function: Optional[str] = None, time: Optional[int] = None, mod: bool = False, **params):
         """
-        Takes self.message from the Command object and converts it from unparsed state (for example: 'The count is {count}.) to a parsed state ('The count is 6.)
-        :return: a parsed string
-        """
-        output = ''
-        bracket = False
-        variables = []
-        for char in self.message:
-            if bracket:
-                if char == '}':
-                    bracket = False
-                    variables.append(variable)
-                    output += char
-                else:
-                    variable += char
-                continue
-
-            if char == '{':
-                bracket = True
-                variable = ''
-                output += char
-
-            else:
-                output += char
-        for i in range(len(variables)):
-            if "." in variables[i]:
-                idx = variables[i].index(".")
-                variables[i] = "Command.commands['{}'].{}".format(variables[i][:idx], variables[i][idx+1:])
-            else:
-                variables[i] = "self." + variables[i]
-        output = output.format(*[eval(i, {"Command":Command}, {'self': self}) for i in variables])
-        return output
-
-    commands = {'add':add, "edit":edit, "show": show}
-
-
-    def __init__(self, name: str, message: Optional[str] = None, function: Optional[str] = None, count: Optional[int] = None, ran_range: Optional[list[int,int]] = None, **params):
-        """
-        :param name: the name of the command, maybe it'll come in handy, dunno yet
+        :param name: the name of the command, used to be stored in Command.commands dict
         :param message: message to be sent out to chat
-        :param function: what the function does (for example increase self.counter, ban a person etc)
-        :param count: a counter that the command keeps track of
-        :param ran_range: range in which the command randomizes values (len = 2)
-        :param params: does nothing yet
+        :param function: what the command does (for example increase self.counter, ban a person etc)
+        :param time: if specified, the command will be called periodically every (self.time) seconds. (time) should be higher than 30.
+        :param mod: if set to True, command will only be available to users with moderator status on the channel
         """
         self.name = name
-        if message: self.message = message.strip("'")
+        for key, value in params.items():
+            exec("self.{} = {}".format(key,value), {"__builtins__":{}}, {'self': self})
+        if message: self.message = message
         else: self.message = ""
-        if function: self.function = function.strip("'")
-        else: self.function = Command._pass
-        self.count = count
-        self.ran_range = ran_range
-        Command.commands[self.name] = self
-        self.params = params
+        if function: self.function = self._parse("function", function.strip("'"))
+        else: self.function = ""
+        if time:
+            self.time = time
+            Command.time_commands[name] = self
+        self.mod = mod
+        Command.commands[name] = self
 
 
 
-print(Command.add("!add test count=2 message=print('hello my name is {count}')"))
-print(Command.commands['test'])
-print(Command.commands['test']())
