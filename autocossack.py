@@ -8,13 +8,29 @@ TO DO:
 -error handling?
 -bot should probably be able to work on many streams at once and that's not the case for now
 """
+
 from commands import Command
 import requests as rq
 import json
 import authconfig
 import threading
 import websocket as ws
+import mysql.connector as sql
 ws.enableTrace(True)
+
+
+def update_db(mysql_cursor):
+    """
+        Updates the mysql database.
+        :param mysql_cursor: cursor connected to the database
+        :return: None
+        """
+    for key,command in Command.commands.items():
+        if key in ['add', 'show', 'del', 'help']:
+            continue
+        else:
+            command.save(mysql_cursor)
+
 
 def get_user_id(user: str) -> str:
     """
@@ -62,8 +78,7 @@ def _onmessage(wsapp, message) -> None:
                     break
             if Command.commands.get(chat_message.split()[0][1:]):
                 send_message(authconfig.channel, Command.commands[chat_message.split()[0][1:]](mod, chat_message))
-            else:
-                send_message(authconfig.channel, "Command {} not found.".format(chat_message.split()[0]))
+
 
     if json.loads(message)['metadata']['message_type'] == 'session_welcome':
         sessionid = json.loads(message)['payload']['session']['id']
@@ -86,13 +101,30 @@ def _onmessage(wsapp, message) -> None:
 
 
 
-authheaders = {'Client-Id': authconfig.client_id, 'Authorization': 'Bearer {}'.format(authconfig.app_token)}
-socket = ws.WebSocketApp("wss://eventsub.wss.twitch.tv/ws", header=authheaders, on_message=_onmessage)
-socket.run_forever(sslopt={'username':authconfig.username,
-                           'password':'oauth:{}'.format(authconfig.app_token),
+#Connect to the DB
+try:
+    db = sql.connect(user="root", host="localhost", db="autokozak")
+    cursor = db.cursor(dictionary=True)
+except sql.errors.DatabaseError as Exc:
+    raise Exc #I will maybe someday try to do something else, but crashing the program is okay for now
+
+cursor.execute("SELECT * FROM Command INNER JOIN Broadcaster ON Broadcaster.broadcaster_id = Command.broadcaster_id WHERE broadcaster_name = %s ", (authconfig.channel,))
+
+for i in cursor:
+    print(i)
+    Command(name=i['command_name'], message=i['command_message'], function=i['command_function'], time=i['command_time'], mod=i['command_mod'], **json.loads(i['command_custom']))
+    print('added command {}'.format(i['command_name']))
+
+
+try:
+    authheaders = {'Client-Id': authconfig.client_id, 'Authorization': 'Bearer {}'.format(authconfig.app_token)}
+    socket = ws.WebSocketApp("wss://eventsub.wss.twitch.tv/ws", header=authheaders, on_message=_onmessage)
+    socket.run_forever(sslopt={'username':authconfig.username,
+                               'password':'oauth:{}'.format(authconfig.app_token),
                            'channels':authconfig.channel})
-
-
+finally:
+    update_db(cursor)
+    db.commit()
 
 
 

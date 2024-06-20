@@ -8,6 +8,9 @@ TO DO:
 
 """
 from typing import *
+import mysql.connector as sql
+import authconfig
+import json
 
 
 class Command:
@@ -115,7 +118,33 @@ class Command:
             if self.function: exec(self.function(*args),{"__builtins__": {}, "Command":Command, "Command.commands":Command.commands},{"self":self})
             if self.message: return self._parse("message", self.message.strip("'"))(*args)
 
+    def save(self, mysql_cursor):
+        """
+        Saves the state of a command to the database
+        :param mysql_cursor: cursor connected to the database
+        :return: None
+        """
+        try:
+            mysql_cursor.execute('SELECT broadcaster_name FROM broadcaster WHERE broadcaster_name = %s', (authconfig.channel,))
+            next(mysql_cursor)
+        except StopIteration:
+            mysql_cursor.execute("INSERT INTO broadcaster (broadcaster_name) VALUES (%s)", (authconfig.channel,))
 
+        mysql_cursor.execute('SELECT broadcaster_id FROM broadcaster WHERE broadcaster_name = %s', (authconfig.channel,))
+        broadcaster_id = next(mysql_cursor)['broadcaster_id']
+        mysql_cursor.execute('SELECT command_name FROM command WHERE command_name = %s', (self.name,))
+        parameters = {self.param_names[i]:eval("self.{}".format(self.param_names[i])) for i in range(len(self.param_names))}
+        try:
+            next(mysql_cursor)
+            mysql_cursor.execute(
+                'UPDATE command SET command_message = %s, command_function = %s, command_time = %s, command_mod = %s, command_custom = %s WHERE (command_name = %s AND broadcaster_id = %s)',
+                (self.message, self.raw_function, self.time, self.mod, json.dumps(parameters), self.name,
+                 broadcaster_id))
+        except StopIteration:
+            mysql_cursor.execute(
+                'INSERT INTO command (broadcaster_id, command_name, command_message, command_function, command_time, command_mod, command_custom) VALUES (%s, %s, %s, %s, %s, %s, %s)',
+                (broadcaster_id, self.name, self.message, self.raw_function, self.time, self.mod,
+                 json.dumps(parameters)))
 
     def _parse(self, type: str, message: str) -> Callable:
         """
@@ -175,6 +204,7 @@ class Command:
 
     commands = {'add':add, 'del':delete}
     time_commands = {}
+    _new = {}
 
     def __init__(self, name: str, message: Optional[str] = None, function: Optional[str] = None, time: Optional[int] = None, mod: bool = False, **params):
         """
@@ -185,8 +215,11 @@ class Command:
         :param mod: if set to True, command will only be available to users with moderator status on the channel
         """
         self.name = name
+        self.raw_function = function #important for saving to the database and spares me the hassle of rewriting the Command class for the 4th time
+        self.param_names = []
         for key, value in params.items():
             exec("self.{} = {}".format(key,value), {"__builtins__":{}}, {'self': self})
+            self.param_names.append(key)
         if message: self.message = message
         else: self.message = ""
         if function: self.function = self._parse("function", function.strip("'"))
@@ -194,8 +227,11 @@ class Command:
         if time:
             self.time = time
             Command.time_commands[name] = self
+        else: self.time = None
         self.mod = mod
         Command.commands[name] = self
 
-
-
+print(Command.commands['add'](mod = True, message="!add counter count=1 message='The count is {count}' function='{count} += 1'"))
+print(Command.commands['counter'](mod=False))
+print(Command.commands['counter'](mod=False))
+print(Command.commands['counter'](mod=False))
